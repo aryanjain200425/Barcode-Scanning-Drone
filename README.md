@@ -36,27 +36,6 @@ Warehouse cycle counts are slow, repetitive and often mean working at height. A 
 
 ## System architecture
 
-```mermaid
-flowchart LR
-    BAT[LiPo battery] --> PDB[Power distribution board]
-    PDB --> ESC[4x 30A ESCs] --> MOT[4x EMAX MT2213 motors]
-    PDB --> BUCK[5V USB-C buck] --> PI
-
-    subgraph Companion["Raspberry Pi 5 · ROS2"]
-        PI[ROS2 nodes]
-        CAM[Arducam camera] --> PI
-        PI --> BC[Barcode detection<br/>pyzbar]
-        BC --> DB[(Scanned barcode store)]
-    end
-
-    subgraph FC["Teensy 4.0 · custom flight controller"]
-        IMU[BNO055 IMU] --> PID[PID attitude loop]
-    end
-
-    PI <-->|USB serial| PID
-    PID -->|PWM| ESC
-```
-
 **Flight control (Teensy 4.0):** The BNO055 reports the drone's orientation, and the Teensy runs a PID loop on roll, pitch and yaw. It mixes the corrections into four motor commands and sends them to the ESCs.
 
 **Perception and inventory (Raspberry Pi 5 + ROS2):** The Pi reads frames from the Arducam camera and decodes barcodes with `pyzbar`. It stores each barcode it has scanned, so when the drone passes the same one again it knows the barcode has already been logged. ROS2 is the layer that links the camera, the barcode logic and the flight controller. The Pi talks to the Teensy over USB serial, using the Teensy's micro-USB port.
