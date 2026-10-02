@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teensy Quad — Live PID Tuning</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --panel2:#1c2430; --border:#2a3441;
+    --text:#e6edf3; --dim:#8b98a5; --accent:#4fc3f7;
+    --roll:#4fc3f7; --pitch:#ff7043; --yaw:#ba68c8;
+    --good:#4caf50; --warn:#ffb300; --bad:#f44336;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:16px 20px 30px;
+    -webkit-text-size-adjust:100%;
+  }
+  h1{font-size:18px; margin:0 0 2px;}
+  .sub{color:var(--dim); font-size:12px; margin:0 0 10px;}
+  .safety{
+    background:#3a1f10; border:1px solid #8a4a1c; color:#ffcf9e;
+    border-radius:8px; padding:9px 14px; font-size:12.5px; margin-bottom:14px; line-height:1.5;
+  }
+  .safety b{color:#ffe0b0;}
+  .topbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px;}
+  .pill{
+    padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600;
+    border:1px solid var(--border); background:var(--panel2);
+  }
+  .pill.state-0{color:var(--good); border-color:#2d5c33;}
+  .pill.state-1{color:#fff; background:var(--bad); border-color:#a02c25;}
+  .pill.state-2{color:#111; background:var(--warn); border-color:#a87400;}
+  .pill.state-none{color:var(--dim);}
+  button{
+    background:var(--panel2); color:var(--text); border:1px solid var(--border);
+    border-radius:7px; padding:8px 14px; font-size:12.5px; cursor:pointer;
+    font-family:inherit;
+  }
+  button:hover:not(:disabled){background:#232d3b;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button.primary{background:#1f5c8a; border-color:#2d78ac;}
+  button.primary:hover:not(:disabled){background:#256d9f;}
+  button.kill{background:var(--bad); border-color:#a02c25; color:#fff; font-weight:700; padding:8px 20px;}
+  button.kill:hover:not(:disabled){background:#d63229;}
+  .layout{
+    display:grid; gap:14px; align-items:start;
+    grid-template-columns:312px 312px minmax(0,1fr);
+    grid-template-areas:"ctl gains tlm";
+  }
+  @media (max-width:1320px){
+    .layout{grid-template-columns:330px minmax(0,1fr);
+            grid-template-areas:"ctl tlm" "gains tlm";}
+  }
+  @media (max-width:980px){
+    .layout{grid-template-columns:1fr;
+            grid-template-areas:"ctl" "tlm" "gains";}
+  }
+  .col-ctl{grid-area:ctl;} .col-gains{grid-area:gains;} .col-tlm{grid-area:tlm;}
+  .col-gains > .panel:first-child{margin-top:0;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:13px 15px;}
+  .panel + .panel{margin-top:14px;}
+  .panel h2{font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:0 0 10px; font-weight:600;}
+  .row{display:flex; gap:8px; margin-bottom:8px;}
+  .row button{flex:1;}
+  .barline{display:flex; align-items:center; gap:8px; font-size:11.5px; margin-bottom:6px; color:var(--dim);}
+  .barline .lbl{width:64px; flex:none;}
+  .barwrap{flex:1; height:8px; background:#0a0f16; border-radius:4px; overflow:hidden; position:relative; border:1px solid var(--border);}
+  .barfill{position:absolute; top:0; bottom:0; background:var(--accent); border-radius:4px;}
+  .barval{width:56px; text-align:right; flex:none; font-variant-numeric:tabular-nums; color:var(--text);}
+  .keyhint{font-size:11px; color:var(--dim); line-height:1.7; margin-top:8px;}
+  .keyhint b{color:var(--text); font-family:monospace;}
+  .conn-tabs{display:flex; gap:6px; margin-bottom:10px;}
+  .conn-tabs button{flex:1; padding:7px 8px;}
+  .conn-tabs button.sel{background:#1f5c8a; border-color:#2d78ac; color:#fff;}
+  .conn-tabs button.sel:hover:not(:disabled){background:#256d9f;}
+  .field{display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:11.5px; color:var(--dim);}
+  .field label{flex:none; width:44px;}
+  .field input{
+    flex:1; min-width:0; background:#0a0f16; color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:7px 9px; font-size:12.5px; font-family:inherit;
+  }
+  .field input:focus{outline:none; border-color:var(--accent);}
+  .connnote{font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px;}
+  .connnote.bad{color:#ffab91;}
+  .stepmode{display:flex; gap:5px; margin-bottom:12px;}
+  .stepmode button{flex:1; padding:5px 4px; font-size:11px;}
+  .stepmode button.sel{background:#1f5c8a; border-color:#2d78ac; color:#fff;}
+  .stepmode button.sel:hover:not(:disabled){background:#256d9f;}
+  .gain-group{margin-bottom:14px;}
+  .gain-group h3{font-size:11.5px; margin:0 0 8px; display:flex; align-items:center; gap:6px;}
+  .gain-group h3 .dot{width:9px; height:9px; border-radius:50%; display:inline-block;}
+  .gain{margin-bottom:9px;}
+  .gain-head{display:flex; justify-content:space-between; align-items:baseline; font-size:11.5px; color:var(--dim); margin-bottom:3px;}
+  .gain-head .gfw{font-size:10.5px; color:#5c6b7a; font-variant-numeric:tabular-nums;}
+  .gain-head .gfw.match{color:#3d7a4a;}
+  .gain-head .gfw.pending{color:var(--warn);}
+  .stepper{display:flex; gap:5px; align-items:stretch;}
+  .stepbtn{
+    flex:none; width:38px; padding:0; font-size:17px; line-height:1; font-weight:600;
+    display:flex; align-items:center; justify-content:center; touch-action:manipulation;
+    user-select:none; -webkit-user-select:none;
+  }
+  .stepbtn:active:not(:disabled){background:#2d3b4d;}
+  .gval{
+    flex:1; min-width:0; text-align:center; background:#0a0f16; color:var(--text);
+    border:1px solid var(--border); border-radius:7px; padding:7px 4px;
+    font-size:13px; font-variant-numeric:tabular-nums; font-family:inherit;
+  }
+  .gval:focus{outline:none; border-color:var(--accent); background:#0d151f;}
+  .gval.hot{color:var(--warn); border-color:#6b5220;}
+  .gval.edited{border-color:var(--accent);}
+  canvas{width:100%; display:block; border-radius:8px;}
+  #chart{background:#0a0f16; border:1px solid var(--border);}
+  .legend{display:flex; gap:16px; margin-top:8px; font-size:12px; flex-wrap:wrap;}
+  .legend .item{display:flex; align-items:center; gap:6px;}
+  .swatch{width:11px; height:11px; border-radius:3px; display:inline-block;}
+  .motor-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px;}
+  .motor{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:9px 10px; text-align:center;}
+  .motor .name{font-size:10.5px; color:var(--dim); text-transform:uppercase;}
+  .motor .us{font-size:17px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums;}
+  .status-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px; font-size:11.5px;}
+  .status-grid .k{color:var(--dim);}
+  .status-grid .v{color:var(--text); font-weight:600; font-variant-numeric:tabular-nums;}
+  .status-grid .v.warn{color:var(--warn);}
+  .status-grid .v.bad{color:var(--bad);}
+  .errline{color:var(--bad); font-size:12px; margin-top:8px; font-weight:600;}
+  #exportBox{width:100%; min-height:70px; background:#0a0f16; color:#8fe3b0; border:1px solid var(--border);
+    border-radius:6px; font-family:monospace; font-size:11px; padding:8px; margin-top:8px; resize:vertical;}
+  .log{font-size:11px; color:var(--dim); max-height:70px; overflow-y:auto; margin-top:6px; font-family:monospace;}
+</style>
+</head>
+<body>
+<h1>Teensy Quad — Live PID Tuning</h1>
+<p class="sub">Tune gains over USB, or wirelessly through the Pi's bridge. Attitude, motor pulse widths and link health are live either way.</p>
+<div class="safety">
+  <b>Before you connect:</b> follow the bench checklist in README.md (steps 1–6, props off) at least once on this firmware. Kd is tuned first, quad still, gains at zero P/I. Keep a hand near <b>Space / KILL</b> at all times.
+  This page becomes the only flight-control input while it's connected — closing the tab, losing focus, or losing the link all trigger disarm within a fraction of a second (client-side, plus the bridge's own kill-on-disconnect, plus the firmware's 400&nbsp;ms link-timeout failsafe).
+  <b>Over Wi-Fi there is a network between you and the aircraft</b>: expect the failsafe to fire on congestion, and read "Tuning over Wi-Fi" in README.md first.
+</div>
+<div class="topbar">
+  <span class="pill state-none" id="statePill">NO LINK</span>
+  <span class="pill" id="transportPill">transport: —</span>
+  <span class="pill" id="linkPill">link: —</span>
+  <span class="pill" id="hzPill">loop: — Hz</span>
+  <button class="kill" id="btnKill">SPACE = KILL</button>
+</div>
+<div class="layout">
+  <div class="col-ctl">
+    <div class="panel">
+      <h2>Connection</h2>
+      <div class="conn-tabs">
+        <button id="tabWifi">Wi-Fi (via Pi)</button>
+        <button id="tabUsb">USB direct</button>
+      </div>
+      <div id="wifiFields">
+        <div class="field">
+          <label for="wsHost">Host</label>
+          <input id="wsHost" type="text" inputmode="url" spellcheck="false" placeholder="raspberrypi.local:8000">
+        </div>
+      </div>
+      <div class="row">
+        <button class="primary" id="btnConnect">Connect</button>
+        <button id="btnDisconnect" disabled>Disconnect</button>
+      </div>
+      <div class="connnote" id="connNote"></div>
+    </div>
+    <div class="panel">
+      <h2>Flight control</h2>
+      <div class="row">
+        <button id="btnArm">ENTER = ARM</button>
+      </div>
+      <div class="barline">
+        <span class="lbl">Throttle</span>
+        <div class="barwrap"><div class="barfill" id="barThrottle" style="background:#66bb6a;"></div></div>
+        <span class="barval" id="valThrottle">0%</span>
+      </div>
+      <div class="stepper" style="margin-bottom:8px;">
+        <button class="stepbtn" id="thrDown" title="Throttle down">−</button>
+        <button style="flex:1;" id="thrZero">0 %</button>
+        <button class="stepbtn" id="thrUp" title="Throttle up">+</button>
+      </div>
+      <div class="barline"><span class="lbl">Roll</span><div class="barwrap"><div class="barfill" id="barRoll"></div></div><span class="barval" id="valRoll">0°</span></div>
+      <div class="barline"><span class="lbl">Pitch</span><div class="barwrap"><div class="barfill" id="barPitch"></div></div><span class="barval" id="valPitch">0°</span></div>
+      <div class="barline"><span class="lbl">Yaw rate</span><div class="barwrap"><div class="barfill" id="barYaw"></div></div><span class="barval" id="valYaw">0°/s</span></div>
+      <div class="keyhint">
+        <b>W/S</b> pitch &nbsp; <b>A/D</b> roll &nbsp; <b>Q/E</b> yaw (hold)<br>
+        <b>R/F</b> throttle (step) &nbsp; <b>0</b> throttle to zero<br>
+        <b>Enter</b> arm (only at zero throttle) &nbsp; <b>Space</b> kill<br>
+        <b>Esc</b> kill + disconnect (kill only while a field is focused)<br>
+        Stick input needs a keyboard — the buttons above cover arm, throttle
+        and kill on a tablet.
+      </div>
+    </div>
+  </div>
+  <div class="col-gains">
+    <div class="panel">
+      <h2>PID gains — live</h2>
+      <div class="stepmode">
+        <button data-mult="0.1" id="mFine">Fine ×0.1</button>
+        <button data-mult="1" id="mNorm" class="sel">Normal</button>
+        <button data-mult="5" id="mCoarse">Coarse ×5</button>
+      </div>
+      <div class="gain-group" data-axis="roll">
+        <h3><span class="dot" style="background:var(--roll)"></span>Roll</h3>
+      </div>
+      <div class="gain-group" data-axis="pitch">
+        <h3><span class="dot" style="background:var(--pitch)"></span>Pitch</h3>
+      </div>
+      <div class="gain-group" data-axis="yaw">
+        <h3><span class="dot" style="background:var(--yaw)"></span>Yaw (rate)</h3>
+      </div>
+      <div class="row">
+        <button id="btnResync">Re-read from FC</button>
+        <button id="btnZeroPI">Zero all P &amp; I</button>
+      </div>
+      <button id="btnExport" style="width:100%;">Export gains → firmware code</button>
+      <textarea id="exportBox" readonly style="display:none;"></textarea>
+      <div class="keyhint">
+        <b>fw:</b> is what the firmware reports it's actually running — it turns
+        amber while a change is in flight and green once the aircraft confirms
+        it. Gains live in RAM only and revert on power-cycle; export and paste
+        them into <b>teensy_fc.ino</b> to keep them.
+      </div>
+    </div>
+  </div>
+  <div class="col-tlm">
+    <div class="panel">
+      <h2>Attitude response (roll / pitch / yaw)</h2>
+      <canvas id="chart" height="280"></canvas>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:var(--roll)"></span>Roll <span id="tlmRoll">–</span></div>
+        <div class="item"><span class="swatch" style="background:var(--pitch)"></span>Pitch <span id="tlmPitch">–</span></div>
+        <div class="item"><span class="swatch" style="background:var(--yaw)"></span>Yaw <span id="tlmYaw">–</span></div>
+      </div>
+      <div class="motor-grid">
+        <div class="motor"><div class="name">M1 · FR (CCW)</div><div class="us" id="m1">–</div></div>
+        <div class="motor"><div class="name">M2 · RR (CW)</div><div class="us" id="m2">–</div></div>
+        <div class="motor"><div class="name">M3 · RL (CCW)</div><div class="us" id="m3">–</div></div>
+        <div class="motor"><div class="name">M4 · FL (CW)</div><div class="us" id="m4">–</div></div>
+      </div>
+      <div class="status-grid">
+        <div><div class="k">Loop rate</div><div class="v" id="stLoop">– Hz</div></div>
+        <div><div class="k">Link age</div><div class="v" id="stLink">–</div></div>
+        <div><div class="k">RX frames</div><div class="v" id="stRx">0</div></div>
+        <div><div class="k">Bad CRC</div><div class="v" id="stCrc">0</div></div>
+        <div><div class="k">Frame gap (max 2 s)</div><div class="v" id="stJitter">–</div></div>
+        <div><div class="k">Dropouts &gt;250 ms</div><div class="v" id="stDrop">0</div></div>
+        <div><div class="k">Telemetry rate</div><div class="v" id="stRate">– Hz</div></div>
+        <div><div class="k">Transport</div><div class="v" id="stTransport">—</div></div>
+      </div>
+      <div class="errline" id="errLine" style="display:none;"></div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  // Protocol constants (must match teensy_fc.ino)
+  const UP_HDR0 = 0xA5, UP_HDR1 = 0x5A, UP2_HDR1 = 0x5D;
+  const DN_HDR0 = 0x5A, DN_HDR1 = 0xA5;
+  const UP_LEN = 14, UP2_LEN = 39, DN_LEN = 59;
+  const FLAG_ARM = 0x01, FLAG_KILL = 0x02;
+  const ERR_IMU = 0x01, ERR_CRC = 0x02, ERR_CAL = 0x04;
+  const MAX_ANGLE_DEG = 20.0; // must match firmware MAX_ANGLE_DEG
+  const MAX_YAW_DPS = 120.0; // must match firmware MAX_YAW_RATE_DPS
+  const THROTTLE_STEP = 20;
+  const TX_HZ = 50;
+  const WINDOW = 8; // seconds of chart history
+
+  // Firmware gain ceilings; the UI clamps to these so the display matches the aircraft
+  const GAIN_P_MAX = 5.0, GAIN_D_MAX = 2.0, GAIN_YAWD_MAX = 0.01;
+
+  // step = one press at x1, dec = displayed decimals, warn = value where the box turns amber
+  const GAIN_SPEC = {
+    roll: {
+      kp: {step: 0.005, dec: 4, max: GAIN_P_MAX, warn: 1.0},
+      ki: {step: 0.005, dec: 4, max: GAIN_P_MAX, warn: 1.0},
+      kd: {step: 0.001, dec: 4, max: GAIN_D_MAX, warn: 0.5},
+    },
+    pitch: {
+      kp: {step: 0.005, dec: 4, max: GAIN_P_MAX, warn: 1.0},
+      ki: {step: 0.005, dec: 4, max: GAIN_P_MAX, warn: 1.0},
+      kd: {step: 0.001, dec: 4, max: GAIN_D_MAX, warn: 0.5},
+    },
+    yaw: {
+      kp: {step: 0.005, dec: 4, max: GAIN_P_MAX, warn: 1.0},
+      ki: {step: 0.001, dec: 4, max: GAIN_P_MAX, warn: 0.5},
+      kd: {step: 0.000005, dec: 7, max: GAIN_YAWD_MAX, warn: 0.001},
+    },
+  };
+  const AXES = ['roll','pitch','yaw'];
+  const TERMS = ['kp','ki','kd'];
+  const TERM_IDX = {kp:0, ki:1, kd:2};
+
+  function crc8(bytes, start, len){
+    let c = 0;
+    for (let i=0;i<len;i++){
+      c ^= bytes[start+i];
+      for (let b=0;b<8;b++) c = (c & 0x80) ? ((c<<1) ^ 0x07) & 0xFF : (c<<1) & 0xFF;
+    }
+    return c;
+  }
+
+  function buildCtrl(flags, rollDeg, pitchDeg, yawDps, throttle, seq){
+    const buf = new ArrayBuffer(UP_LEN);
+    const dv = new DataView(buf);
+    dv.setUint8(0, UP_HDR0); dv.setUint8(1, UP_HDR1);
+    dv.setUint8(2, flags & 0xFF);
+    dv.setInt16(3, Math.round(rollDeg*100), true);
+    dv.setInt16(5, Math.round(pitchDeg*100), true);
+    dv.setInt16(7, Math.round(yawDps*100), true);
+    dv.setUint16(9, throttle & 0xFFFF, true);
+    dv.setUint16(11, seq & 0xFFFF, true);
+    const bytes = new Uint8Array(buf);
+    bytes[13] = crc8(bytes, 2, UP_LEN-3);
+    return bytes;
+  }
+
+  function buildGains(g){ // g = array of 9 floats
+    const buf = new ArrayBuffer(UP2_LEN);
+    const dv = new DataView(buf);
+    dv.setUint8(0, UP_HDR0); dv.setUint8(1, UP2_HDR1);
+    for (let i=0;i<9;i++) dv.setFloat32(2+i*4, g[i], true);
+    const bytes = new Uint8Array(buf);
+    bytes[UP2_LEN-1] = crc8(bytes, 2, UP2_LEN-3);
+    return bytes;
+  }
+
+  function parseDownlink(bytes, off){
+    if (bytes.length - off < DN_LEN) return null;
+    if (bytes[off] !== DN_HDR0 || bytes[off+1] !== DN_HDR1) return null;
+    const crcCalc = crc8(bytes, off+2, DN_LEN-3);
+    if (crcCalc !== bytes[off+DN_LEN-1]) return null;
+    const dv = new DataView(bytes.buffer, bytes.byteOffset+off, DN_LEN);
+    const state = dv.getUint8(2);
+    const roll = dv.getInt16(3, true)/100;
+    const pitch = dv.getInt16(5, true)/100;
+    const yaw = dv.getInt16(7, true)/100;
+    const motors = [dv.getUint16(9,true), dv.getUint16(11,true), dv.getUint16(13,true), dv.getUint16(15,true)];
+    const hz = dv.getUint16(17,true);
+    const err = dv.getUint8(19);
+    const seq = dv.getUint16(20,true);
+    const gains = [];
+    for (let i=0;i<9;i++) gains.push(dv.getFloat32(22+i*4,true));
+    return {state, roll, pitch, yaw, motors, hz, err, seq, gains};
+  }
+
+  const els = {};
+  ['statePill','transportPill','linkPill','hzPill','btnKill','btnArm',
+   'barThrottle','valThrottle','barRoll','valRoll','barPitch','valPitch','barYaw','valYaw',
+   'thrUp','thrDown','thrZero',
+   'chart','tlmRoll','tlmPitch','tlmYaw','m1','m2','m3','m4',
+   'stLoop','stLink','stRx','stCrc','stJitter','stDrop','stRate','stTransport',
+   'errLine','log','btnExport','exportBox','btnResync','btnZeroPI',
+   'tabWifi','tabUsb','wifiFields','wsHost','btnConnect','btnDisconnect','connNote',
+   'mFine','mNorm','mCoarse'
+  ].forEach(id => els[id] = document.getElementById(id));
+
+  const state = {
+    transport: null,
+    kind: 'wifi', // 'wifi' | 'usb'
+    rxBuf: new Uint8Array(0),
+    seq: 0,
+    held: {w:false,a:false,s:false,d:false,q:false,e:false},
+    throttle: 0, roll: 0, pitch: 0, yaw: 0,
+    armReq: false, killUntil: 0, armSentSeq: null, armReqAt: 0,
+    gains: {roll:[0.20,0.30,0.05], pitch:[0.20,0.30,0.05], yaw:[0.30,0.05,0.00015]},
+    gainsDirty: false, lastGainsSend: 0, gainsSynced: false,
+    confirmedGains: null,
+    stepMult: 1,
+    tlm: null, lastRxTime: 0, rxCount: 0, badCrc: 0,
+    maxGap: 0, dropouts: 0, rateWindow: [],
+    history: [], simTimeStart: performance.now(),
+    txTimer: null,
+  };
+
+  function log(msg){
+    const t = new Date().toLocaleTimeString();
+    els.log.innerHTML = `[${t}] ${msg}<br>` + els.log.innerHTML;
+  }
+
+  const isConnected = () => !!(state.transport && state.transport.isOpen());
+
+  function WebSerialTransport(){
+    let port = null, writer = null, reading = false, readerRef = null;
+    return {
+      kind: 'usb',
+      label: 'USB (Web Serial)',
+      isOpen: () => reading && !!writer,
+      async connect(onBytes, onClosed){
+        if (!('serial' in navigator)) throw new Error('Web Serial is not available in this browser.');
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 500000 });
+        writer = port.writable.getWriter();
+        reading = true;
+        (async () => {
+          const reader = port.readable.getReader();
+          readerRef = reader;
+          try {
+            while (reading){
+              const {value, done} = await reader.read();
+              if (done) break;
+              if (value) onBytes(value);
+            }
+          } catch(e){ log('Read error: ' + e.message); }
+          finally {
+            try { reader.releaseLock(); } catch(e){}
+            if (reading){ reading = false; onClosed('serial stream ended'); }
+          }
+        })();
+      },
+      async send(bytes){
+        if (!writer) return;
+        try { await writer.write(bytes); } catch(e){ log('Write error: ' + e.message); }
+      },
+      async close(){
+        reading = false;
+        try { if (readerRef) await readerRef.cancel(); } catch(e){}
+        try { if (writer) writer.releaseLock(); } catch(e){}
+        try { if (port) await port.close(); } catch(e){}
+        port = null; writer = null; readerRef = null;
+      },
+    };
+  }
+
+  function WebSocketTransport(host){
+    let ws = null, closedNotified = false;
+    const scheme = (location.protocol === 'https:') ? 'wss' : 'ws';
+    const url = `${scheme}://${host}/ws`;
+    return {
+      kind: 'wifi',
+      label: 'Wi-Fi → ' + url,
+      isOpen: () => !!ws && ws.readyState === WebSocket.OPEN,
+      connect(onBytes, onClosed){
+        return new Promise((resolve, reject) => {
+          try { ws = new WebSocket(url); }
+          catch(e){ reject(new Error('Bad host: ' + e.message)); return; }
+          ws.binaryType = 'arraybuffer';
+          const fail = (msg) => {
+            if (!closedNotified){ closedNotified = true; onClosed(msg); }
+          };
+          const timeout = setTimeout(() => {
+            if (ws && ws.readyState === WebSocket.CONNECTING){
+              try { ws.close(); } catch(e){}
+              reject(new Error('Timed out reaching ' + url));
+            }
+          }, 6000);
+          ws.onopen = () => { clearTimeout(timeout); resolve(); };
+          ws.onmessage = (ev) => {
+            if (ev.data instanceof ArrayBuffer) onBytes(new Uint8Array(ev.data));
+          };
+          ws.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error('Could not reach ' + url + ' — is tune_bridge.py running?'));
+            fail('socket error');
+          };
+          ws.onclose = (ev) => {
+            clearTimeout(timeout);
+            fail('socket closed' + (ev.reason ? ': ' + ev.reason : ''));
+          };
+        });
+      },
+      send(bytes){
+        if (ws && ws.readyState === WebSocket.OPEN){
+          try { ws.send(bytes); } catch(e){ log('Send error: ' + e.message); }
+        }
+      },
+      close(){
+        closedNotified = true; // intentional close isn't a link loss
+        try { if (ws) ws.close(1000, 'client closing'); } catch(e){}
+        ws = null;
+      },
+    };
+  }
+
+  const webSerialAvailable = ('serial' in navigator);
+
+  function defaultHost(){
+    if (location.protocol.startsWith('http') && location.host) return location.host;
+    return 'raspberrypi.local:8000';
+  }
+
+  function selectKind(kind){
+    if (isConnected()) return;
+    state.kind = kind;
+    els.tabWifi.classList.toggle('sel', kind === 'wifi');
+    els.tabUsb.classList.toggle('sel', kind === 'usb');
+    els.wifiFields.style.display = (kind === 'wifi') ? '' : 'none';
+    updateConnNote();
+  }
+
+  function updateConnNote(){
+    const n = els.connNote;
+    n.classList.remove('bad');
+    if (state.kind === 'usb'){
+      if (!webSerialAvailable){
+        n.classList.add('bad');
+        n.textContent = 'Web Serial is unavailable here. It needs Chrome or Edge on a '
+          + 'secure origin — https, or http://localhost. A page served from the Pi over '
+          + 'plain http can only use the Wi-Fi transport.';
+      } else {
+        n.textContent = 'Plug the Teensy into this computer’s USB port. Nothing else '
+          + 'may hold the port — stop drone_ctl.py and tune_bridge.py first.';
+      }
+    } else {
+      n.textContent = 'Run python3 tune_bridge.py on the Pi, then point this at it. '
+        + 'The bridge owns the serial port while it runs, so drone_ctl.py cannot run at '
+        + 'the same time.';
+    }
+  }
+
+  els.tabWifi.addEventListener('click', () => selectKind('wifi'));
+  els.tabUsb.addEventListener('click', () => selectKind('usb'));
+
+  async function connect(){
+    if (isConnected()) return;
+    let t;
+    if (state.kind === 'usb'){
+      if (!webSerialAvailable){ log('Web Serial unavailable in this context.'); return; }
+      t = WebSerialTransport();
+    } else {
+      const host = (els.wsHost.value || '').trim();
+      if (!host){ log('Enter the Pi’s host:port first.'); return; }
+      t = WebSocketTransport(host);
+    }
+    els.btnConnect.disabled = true;
+    try {
+      await t.connect(feedBytes, onTransportClosed);
+      state.transport = t;
+      state.gainsSynced = false; // re-learn gains from the aircraft on every new link
+      state.rxBuf = new Uint8Array(0);
+      resetLinkStats();
+      els.btnDisconnect.disabled = false;
+      els.transportPill.textContent = t.kind === 'usb' ? 'transport: USB' : 'transport: Wi-Fi';
+      els.stTransport.textContent = t.kind === 'usb' ? 'USB' : 'Wi-Fi';
+      log('Connected — ' + t.label);
+      startTx();
+    } catch(e){
+      els.btnConnect.disabled = false;
+      log('Connect failed: ' + e.message);
+    }
+  }
+
+  function onTransportClosed(why){
+    log('Link lost (' + why + ') — disarming.');
+    doKill();
+    teardown();
+  }
+
+  function teardown(){
+    stopTx();
+    state.transport = null;
+    state.tlm = null;
+    els.btnConnect.disabled = false;
+    els.btnDisconnect.disabled = true;
+    els.transportPill.textContent = 'transport: —';
+    els.stTransport.textContent = '—';
+  }
+
+  async function disconnect(){
+    if (!state.transport){ teardown(); return; }
+    sendKillBurst();
+    const t = state.transport;
+    state.transport = null;
+    stopTx();
+    try { await t.close(); } catch(e){}
+    teardown();
+    log('Disconnected.');
+  }
+
+  els.btnConnect.addEventListener('click', connect);
+  els.btnDisconnect.addEventListener('click', disconnect);
+
+  function resetLinkStats(){
+    state.rxCount = 0; state.badCrc = 0; state.maxGap = 0;
+    state.dropouts = 0; state.rateWindow = []; state.lastRxTime = 0;
+  }
+
+  function quantize(v, spec){
+    // Round to display precision (not a step grid) so readout, export and wire agree
+    return parseFloat(v.toFixed(spec.dec));
+  }
+
+  function fmtGain(v, spec){ return v.toFixed(spec.dec); }
+
+  function buildGainRows(){
+    AXES.forEach(ax => {
+      const group = document.querySelector(`.gain-group[data-axis="${ax}"]`);
+      TERMS.forEach(t => {
+        const spec = GAIN_SPEC[ax][t];
+        const wrap = document.createElement('div');
+        wrap.className = 'gain';
+        wrap.innerHTML =
+          `<div class="gain-head"><span class="gname">${t[0].toUpperCase() + t.slice(1)}</span>` +
+          `<span class="gfw" id="c_${t}_${ax}">fw —</span></div>` +
+          `<div class="stepper">` +
+            `<button class="stepbtn" data-ax="${ax}" data-t="${t}" data-dir="-1" aria-label="decrease ${t} ${ax}">−</button>` +
+            `<input class="gval" id="i_${t}_${ax}" inputmode="decimal" spellcheck="false" ` +
+                   `aria-label="${t} ${ax}" value="0">` +
+            `<button class="stepbtn" data-ax="${ax}" data-t="${t}" data-dir="1" aria-label="increase ${t} ${ax}">+</button>` +
+          `</div>`;
+        group.appendChild(wrap);
+        els[`i_${t}_${ax}`] = wrap.querySelector('input');
+        els[`c_${t}_${ax}`] = wrap.querySelector('.gfw');
+      });
+    });
+  }
+  buildGainRows();
+
+  function setGain(ax, term, value, {fromUser=true} = {}){
+    const spec = GAIN_SPEC[ax][term];
+    let v = quantize(Math.max(0, Math.min(spec.max, value)), spec);
+    state.gains[ax][TERM_IDX[term]] = v;
+    const input = els[`i_${term}_${ax}`];
+    if (document.activeElement !== input) input.value = fmtGain(v, spec);
+    input.classList.toggle('hot', v > spec.warn);
+    if (fromUser) state.gainsDirty = true;
+  }
+
+  function bumpGain(ax, term, dir){
+    const spec = GAIN_SPEC[ax][term];
+    const cur = state.gains[ax][TERM_IDX[term]];
+    setGain(ax, term, cur + dir * spec.step * state.stepMult);
+    const input = els[`i_${term}_${ax}`];
+    if (document.activeElement !== input) input.value = fmtGain(state.gains[ax][TERM_IDX[term]], spec);
+  }
+
+  // Press-and-hold repeat: one step per tap, then accelerates
+  function attachHold(el, fn){
+    let timer = null, delay = 0, lastPointer = 0;
+    const stop = () => { if (timer){ clearTimeout(timer); timer = null; } };
+    const tick = () => {
+      fn();
+      delay = Math.max(30, delay * 0.82);
+      timer = setTimeout(tick, delay);
+    };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      lastPointer = performance.now();
+      fn();
+      delay = 380;
+      stop();
+      timer = setTimeout(tick, delay);
+    });
+    ['pointerup','pointerleave','pointercancel'].forEach(ev =>
+      el.addEventListener(ev, () => { if (timer){ stop(); onStepRelease(); } }));
+    // Keyboard activation still fires click; ignore it right after a pointer press
+    el.addEventListener('click', () => {
+      if (performance.now() - lastPointer < 600) return;
+      fn(); onStepRelease();
+    });
+  }
+
+  function onStepRelease(){
+    if (state.gainsDirty) sendGainsNow();
+  }
+
+  document.querySelectorAll('.stepbtn[data-ax]').forEach(btn => {
+    const {ax, t, dir} = btn.dataset;
+    attachHold(btn, () => bumpGain(ax, t, parseInt(dir, 10)));
+    btn.addEventListener('pointerup', () => btn.blur());
+  });
+
+  AXES.forEach(ax => TERMS.forEach(t => {
+    const input = els[`i_${t}_${ax}`];
+    const spec = GAIN_SPEC[ax][t];
+    input.addEventListener('focus', () => input.classList.add('edited'));
+    const commit = () => {
+      input.classList.remove('edited');
+      const v = parseFloat(input.value);
+      if (!isFinite(v) || v < 0){
+        input.value = fmtGain(state.gains[ax][TERM_IDX[t]], spec);
+        return;
+      }
+      setGain(ax, t, v);
+      input.value = fmtGain(state.gains[ax][TERM_IDX[t]], spec);
+      sendGainsNow();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+      else if (e.key === 'Escape'){
+        input.value = fmtGain(state.gains[ax][TERM_IDX[t]], spec);
+        input.blur();
+      } else if (e.key === 'ArrowUp'){ e.preventDefault(); bumpGain(ax,t,1); input.value = fmtGain(state.gains[ax][TERM_IDX[t]], spec); }
+      else if (e.key === 'ArrowDown'){ e.preventDefault(); bumpGain(ax,t,-1); input.value = fmtGain(state.gains[ax][TERM_IDX[t]], spec); }
+    });
+  }));
+
+  [['mFine',0.1],['mNorm',1],['mCoarse',5]].forEach(([id, mult]) => {
+    els[id].addEventListener('click', () => {
+      state.stepMult = mult;
+      ['mFine','mNorm','mCoarse'].forEach(o => els[o].classList.toggle('sel', o === id));
+      els[id].blur();
+    });
+  });
+
+  function flattenGains(){
+    return [...state.gains.roll, ...state.gains.pitch, ...state.gains.yaw];
+  }
+
+  const GAIN_FLAT = [
+    ['roll','kp',0],['roll','ki',1],['roll','kd',2],
+    ['pitch','kp',3],['pitch','ki',4],['pitch','kd',5],
+    ['yaw','kp',6],['yaw','ki',7],['yaw','kd',8],
+  ];
+
+  function applyConfirmedGains(g){
+    state.confirmedGains = g;
+    GAIN_FLAT.forEach(([ax,t,i]) => {
+      const spec = GAIN_SPEC[ax][t];
+      const el = els[`c_${t}_${ax}`];
+      el.textContent = 'fw ' + g[i].toFixed(spec.dec);
+      // Half-step tolerance: the firmware stores float32
+      const matched = Math.abs(g[i] - state.gains[ax][TERM_IDX[t]]) < spec.step * 0.5;
+      el.classList.toggle('match', matched);
+      el.classList.toggle('pending', !matched);
+    });
+  }
+
+  function syncGainsFromFirmware(g){
+    GAIN_FLAT.forEach(([ax,t,i]) => setGain(ax, t, g[i], {fromUser:false}));
+    state.gainsDirty = false;
+  }
+
+  function sendGainsNow(){
+    state.gainsDirty = false;
+    state.lastGainsSend = performance.now();
+    sendBytes(buildGains(flattenGains()));
+  }
+
+  els.btnResync.addEventListener('click', () => {
+    if (!state.tlm){ log('No telemetry to read gains from.'); return; }
+    syncGainsFromFirmware(state.tlm.gains);
+    log('Gains re-read from the flight controller.');
+    els.btnResync.blur();
+  });
+
+  els.btnZeroPI.addEventListener('click', () => {
+    AXES.forEach(ax => { setGain(ax,'kp',0); setGain(ax,'ki',0); });
+    sendGainsNow();
+    log('All P and I terms zeroed — Kd-only, per the tuning order.');
+    els.btnZeroPI.blur();
+  });
+
+  els.btnExport.addEventListener('click', () => {
+    const g = state.confirmedGains || flattenGains();
+    const box = els.exportBox;
+    box.style.display = 'block';
+    box.value =
+`static float Kp_roll = ${g[0].toFixed(4)}f, Ki_roll = ${g[1].toFixed(4)}f, Kd_roll = ${g[2].toFixed(4)}f;
+static float Kp_pitch = ${g[3].toFixed(4)}f, Ki_pitch = ${g[4].toFixed(4)}f, Kd_pitch = ${g[5].toFixed(4)}f;
+static float Kp_yaw = ${g[6].toFixed(4)}f, Ki_yaw = ${g[7].toFixed(4)}f, Kd_yaw = ${g[8].toFixed(6)}f;
+// paste into teensy_fc.ino and re-upload; live gains don't survive a reset`;
+    box.focus(); box.select();
+  });
+
+  function updateSetpoints(){
+    state.pitch = (state.held.w ? -MAX_ANGLE_DEG : 0) + (state.held.s ? MAX_ANGLE_DEG : 0);
+    state.roll = (state.held.a ? -MAX_ANGLE_DEG : 0) + (state.held.d ? MAX_ANGLE_DEG : 0);
+    state.yaw = (state.held.q ? -MAX_YAW_DPS : 0) + (state.held.e ? MAX_YAW_DPS : 0);
+  }
+
+  function tryArm(){
+    if (state.throttle !== 0) { log('Cannot arm: throttle not at zero.'); return; }
+    state.armReq = true;
+    state.armSentSeq = null;
+    state.armReqAt = performance.now();
+    log('ARM requested');
+  }
+  function doKill(){
+    state.armReq = false;
+    state.armSentSeq = null;
+    state.killUntil = performance.now() + 500;
+    state.throttle = 0;
+    log('KILL');
+  }
+  function sendKillBurst(n = 6){
+    for (let i=0;i<n;i++){
+      sendBytes(buildCtrl(FLAG_KILL, 0, 0, 0, 0, (state.seq + i) & 0xFFFF));
+    }
+    state.seq = (state.seq + n) & 0xFFFF;
+  }
+
+  els.btnArm.addEventListener('click', () => { tryArm(); els.btnArm.blur(); });
+  els.btnKill.addEventListener('click', () => { doKill(); sendKillBurst(); els.btnKill.blur(); });
+
+  attachHold(els.thrUp, () => { state.throttle = Math.min(1000, state.throttle + THROTTLE_STEP); });
+  attachHold(els.thrDown, () => { state.throttle = Math.max(0, state.throttle - THROTTLE_STEP); });
+  els.thrZero.addEventListener('click', () => { state.throttle = 0; els.thrZero.blur(); });
+  [els.thrUp, els.thrDown].forEach(b => b.addEventListener('pointerup', () => b.blur()));
+
+  window.addEventListener('keydown', (e) => {
+    // Typing in a field must not fly the aircraft; Escape still kills (without disconnecting)
+    const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable);
+    if (typing){
+      if (e.key === 'Escape'){ doKill(); sendKillBurst(); }
+      return;
+    }
+
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (k === 'escape') { doKill(); sendKillBurst(); disconnect(); return; }
+    if (k in state.held) { state.held[k] = true; updateSetpoints(); e.preventDefault(); return; }
+    if (k === 'r') { state.throttle = Math.min(1000, state.throttle + THROTTLE_STEP); e.preventDefault(); return; }
+    if (k === 'f') { state.throttle = Math.max(0, state.throttle - THROTTLE_STEP); e.preventDefault(); return; }
+    if (k === '0') { state.throttle = 0; return; }
+    if (k === 'enter') { tryArm(); return; }
+    if (k === ' ') { doKill(); sendKillBurst(); e.preventDefault(); return; }
+  });
+  window.addEventListener('keyup', (e) => {
+    const k = e.key.toLowerCase();
+    if (k in state.held) { state.held[k] = false; updateSetpoints(); }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden){ doKill(); sendKillBurst(); }
+  });
+  window.addEventListener('blur', () => { doKill(); });
+  window.addEventListener('pagehide', () => { doKill(); sendKillBurst(); });
+  window.addEventListener('beforeunload', () => { doKill(); sendKillBurst(); });
+
+  function sendBytes(bytes){
+    if (state.transport) state.transport.send(bytes);
+  }
+
+  function feedBytes(chunk){
+    const merged = new Uint8Array(state.rxBuf.length + chunk.length);
+    merged.set(state.rxBuf); merged.set(chunk, state.rxBuf.length);
+    state.rxBuf = merged;
+    let latest = null;
+    while (true){
+      let idx = -1;
+      for (let i=0; i+1<state.rxBuf.length; i++){
+        if (state.rxBuf[i]===DN_HDR0 && state.rxBuf[i+1]===DN_HDR1){ idx=i; break; }
+      }
+      if (idx < 0){ if (state.rxBuf.length>1) state.rxBuf = state.rxBuf.slice(state.rxBuf.length-1); break; }
+      if (state.rxBuf.length - idx < DN_LEN){ state.rxBuf = state.rxBuf.slice(idx); break; }
+      const tlm = parseDownlink(state.rxBuf, idx);
+      if (!tlm){ state.badCrc++; state.rxBuf = state.rxBuf.slice(idx+1); continue; }
+      latest = tlm;
+      state.rxCount++;
+      state.rxBuf = state.rxBuf.slice(idx + DN_LEN);
+    }
+    if (latest) onTelemetry(latest);
+  }
+
+  function startTx(){
+    stopTx();
+    state.txTimer = setInterval(() => {
+      if (!isConnected()){ stopTx(); return; }
+      const now = performance.now();
+      let flags = 0;
+      if (now < state.killUntil) flags |= FLAG_KILL;
+      else if (state.armReq) flags |= FLAG_ARM;
+      // Remember which packet first carried the arm request (see onTelemetry)
+      if ((flags & FLAG_ARM) && state.armSentSeq === null) state.armSentSeq = state.seq;
+      sendBytes(buildCtrl(flags, state.roll, state.pitch, state.yaw, state.throttle, state.seq));
+      state.seq = (state.seq+1) & 0xFFFF;
+
+      if (state.gainsDirty && now - state.lastGainsSend > 150) sendGainsNow();
+    }, 1000/TX_HZ);
+  }
+  function stopTx(){
+    if (state.txTimer){ clearInterval(state.txTimer); state.txTimer = null; }
+  }
+
+  function onTelemetry(tlm){
+    const now = performance.now();
+    if (state.lastRxTime){
+      const gap = now - state.lastRxTime;
+      if (gap > state.maxGap) state.maxGap = gap;
+      if (gap > 250) state.dropouts++;
+    }
+    state.rateWindow.push(now);
+    while (state.rateWindow.length && state.rateWindow[0] < now - 2000) state.rateWindow.shift();
+
+    state.tlm = tlm;
+    state.lastRxTime = now;
+    if (!state.gainsSynced){
+      syncGainsFromFirmware(tlm.gains);
+      state.gainsSynced = true;
+      log('Gains synced from firmware.');
+    }
+    applyConfirmedGains(tlm.gains);
+
+    // Treat DISARMED as a refusal only once the echoed seq shows the FC saw the arm request
+    if (tlm.state !== 0){
+      state.armSentSeq = null;
+    } else if (state.armReq){
+      const seenIt = state.armSentSeq !== null && ((tlm.seq - state.armSentSeq) & 0xFFFF) < 0x8000;
+      if (seenIt){
+        state.armReq = false;
+        state.armSentSeq = null;
+        log('Flight controller refused to arm (throttle up, IMU fault, or still calibrating).');
+      } else if (now - state.armReqAt > 3000){
+        state.armReq = false;
+        state.armSentSeq = null;
+        log('Arm request timed out with no acknowledgement.');
+      }
+    }
+
+    const tSec = (now - state.simTimeStart)/1000;
+    state.history.push({t: tSec, roll: tlm.roll, pitch: tlm.pitch, yaw: tlm.yaw});
+    while (state.history.length && state.history[0].t < tSec - WINDOW) state.history.shift();
+  }
+
+  const ctx = els.chart.getContext('2d');
+  function resizeCanvas(){
+    const rect = els.chart.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    els.chart.width = rect.width * dpr;
+    els.chart.height = 280 * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  function drawChart(){
+    const w = els.chart.clientWidth, h = 280;
+    ctx.clearRect(0,0,w,h);
+    const padL = 40, padR = 10, padT = 10, padB = 20;
+    const plotW = w-padL-padR, plotH = h-padT-padB;
+    const yMax = 45, yMin = -45;
+    const tNow = (performance.now()-state.simTimeStart)/1000, tMin = tNow-WINDOW;
+    const xOf = t => padL + ((t-tMin)/WINDOW)*plotW;
+    const yOf = v => padT + plotH - ((v-yMin)/(yMax-yMin))*plotH;
+
+    ctx.strokeStyle = '#1b2530'; ctx.lineWidth=1; ctx.font='10px sans-serif'; ctx.fillStyle='#5c6b7a';
+    for (let v=yMin; v<=yMax; v+=15){
+      const y = yOf(v);
+      ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(w-padR,y); ctx.stroke();
+      ctx.fillText(v+'°', 4, y+3);
+    }
+    ctx.beginPath(); ctx.moveTo(padL, yOf(0)); ctx.lineTo(w-padR, yOf(0)); ctx.strokeStyle='#2a3441'; ctx.stroke();
+
+    if (state.history.length > 1){
+      const series = [['roll','#4fc3f7'],['pitch','#ff7043'],['yaw','#ba68c8']];
+      series.forEach(([key,color]) => {
+        ctx.strokeStyle = color; ctx.lineWidth=2; ctx.beginPath();
+        state.history.forEach((pt,i) => {
+          const x = xOf(pt.t), y = yOf(Math.max(yMin,Math.min(yMax,pt[key])));
+          if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        });
+        ctx.stroke();
+      });
+    }
+    ctx.strokeStyle='#2a3441'; ctx.strokeRect(padL,padT,plotW,plotH);
+  }
+
+  function fmtBar(el, valEl, value, lo, hi, unit, decimals){
+    const frac = (value-lo)/(hi-lo);
+    const pct = Math.max(0,Math.min(100, frac*100));
+    if (lo < 0){
+      const mid=50; const span = Math.max(Math.abs(lo),Math.abs(hi));
+      const p = Math.max(-mid, Math.min(mid, (value/span)*mid));
+      el.style.left = (p<0? 50+p : 50)+'%';
+      el.style.width = Math.abs(p)+'%';
+      el.style.background = value<0 ? '#ff7043' : '#4fc3f7';
+    } else {
+      el.style.left='0%'; el.style.width=pct+'%';
+    }
+    valEl.textContent = value.toFixed(decimals)+unit;
+  }
+
+  function render(){
+    fmtBar(els.barThrottle, els.valThrottle, state.throttle/10, 0, 100, '%', 0);
+    fmtBar(els.barRoll, els.valRoll, state.roll, -MAX_ANGLE_DEG, MAX_ANGLE_DEG, '°', 1);
+    fmtBar(els.barPitch, els.valPitch, state.pitch, -MAX_ANGLE_DEG, MAX_ANGLE_DEG, '°', 1);
+    fmtBar(els.barYaw, els.valYaw, state.yaw, -MAX_YAW_DPS, MAX_YAW_DPS, '°/s', 0);
+
+    els.btnArm.disabled = state.throttle !== 0 || !state.tlm;
+
+    const tlm = state.tlm;
+    const linkAge = state.lastRxTime ? (performance.now()-state.lastRxTime) : Infinity;
+    const stateNames = {0:'DISARMED',1:'ARMED',2:'FAILSAFE'};
+
+    if (!tlm || linkAge > 3000){
+      els.statePill.textContent = 'NO LINK';
+      els.statePill.className = 'pill state-none';
+    } else {
+      els.statePill.textContent = stateNames[tlm.state] || '?';
+      els.statePill.className = 'pill state-' + tlm.state;
+    }
+    els.linkPill.textContent = tlm ? `link: ${Math.round(linkAge)} ms` : 'link: —';
+    els.hzPill.textContent = tlm ? `loop: ${tlm.hz} Hz` : 'loop: — Hz';
+
+    if (tlm){
+      els.tlmRoll.textContent = tlm.roll.toFixed(1)+'°';
+      els.tlmPitch.textContent = tlm.pitch.toFixed(1)+'°';
+      els.tlmYaw.textContent = tlm.yaw.toFixed(1)+'°';
+      els.m1.textContent = tlm.motors[0]+' µs';
+      els.m2.textContent = tlm.motors[1]+' µs';
+      els.m3.textContent = tlm.motors[2]+' µs';
+      els.m4.textContent = tlm.motors[3]+' µs';
+      els.stLoop.textContent = tlm.hz+' Hz';
+      els.stLink.textContent = Math.round(linkAge)+' ms';
+
+      const errs = [];
+      if (tlm.err & ERR_IMU) errs.push('IMU-FAIL');
+      if (tlm.err & ERR_CRC) errs.push('CRC');
+      if (tlm.err & ERR_CAL) errs.push('CALIBRATING');
+      if (errs.length){ els.errLine.style.display='block'; els.errLine.textContent = 'ERROR: '+errs.join(' '); }
+      else els.errLine.style.display='none';
+    }
+    els.stRx.textContent = state.rxCount;
+    els.stCrc.textContent = state.badCrc;
+
+    els.stJitter.textContent = state.maxGap ? Math.round(state.maxGap)+' ms' : '–';
+    els.stJitter.className = 'v' + (state.maxGap > 400 ? ' bad' : state.maxGap > 150 ? ' warn' : '');
+    els.stDrop.textContent = state.dropouts;
+    els.stDrop.className = 'v' + (state.dropouts > 0 ? ' warn' : '');
+    const rate = state.rateWindow.length ? state.rateWindow.length / Math.max(0.5, (performance.now() - state.rateWindow[0]) / 1000) : 0;
+    els.stRate.textContent = rate ? rate.toFixed(1)+' Hz' : '– Hz';
+    els.stRate.className = 'v' + (isConnected() && rate && rate < 15 ? ' warn' : '');
+
+    drawChart();
+    requestAnimationFrame(render);
+  }
+
+  els.wsHost.value = defaultHost();
+  const servedFromBridge = location.protocol.startsWith('http') && !['localhost', '127.0.0.1', ''].includes(location.hostname);
+  selectKind((servedFromBridge || !webSerialAvailable) ? 'wifi' : 'usb');
+  els.tabUsb.disabled = !webSerialAvailable;
+
+  resizeCanvas();
+  requestAnimationFrame(render);
+  log(servedFromBridge ? 'Served from the bridge — click Connect to talk to the aircraft.' : 'Ready. Pick a transport and click Connect.');
+})();
+</script>
+</body>
+</html>
