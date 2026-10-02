@@ -55,8 +55,8 @@ The ROS2 pipeline on the Pi reads frames from the Arducam camera and decodes bar
 | Feature | Status |
 |---|---|
 | Hardware build and wiring (Pi 5, camera, Teensy, IMU, motors) | ✅ Complete |
-| Barcode detection with `pyzbar` through the ROS2 pipeline | ✅ Working |
-| Barcode memory (recognizes barcodes it has already seen) | ✅ Working |
+| Barcode detection with `pyzbar` through the ROS2 pipeline | ❌ Not working yet |
+| Barcode memory (recognizes barcodes it has already seen) | ❌ Not working yet |
 | Keyboard flight control over SSH (Pi → Teensy via USB serial) | ✅ Working |
 | Lift-off and closed-loop attitude hold | ⚠️ Achieves lift, but the PID gains aren't tuned yet, so flight has large oscillations and isn't reliable |
 | ROS2 integration for the flight controller | ❌ Not set up yet |
